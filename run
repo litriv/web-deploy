@@ -1,0 +1,56 @@
+#!/bin/bash
+
+set -e
+
+usage() {
+	base="$(basename "$0")"
+	cat <<EOUSAGE
+
+usage: $base command [args]
+
+
+Available Commands:
+
+  $base build 
+	- builds the deployment server image
+  $base bash 
+	- runs an interactive container with a bash shell
+
+EOUSAGE
+}
+
+# "shift" so that "$@" becomes the remaining arguments and can be passed along to other "go" subcommands easily
+cmd="$1"
+if ! shift; then
+	usage >&2
+	exit 1
+fi
+
+container_cmd() {
+	docker run \
+		-it \
+		--name=ac_deploy \
+		-v /var/run/docker.sock:/var/run/docker.sock \
+		-v $(which docker):/usr/bin/docker \
+		-v $(which git):/usr/bin/git \
+		ac_deploy $1
+}
+
+case "$cmd" in
+	# build builds the deployment server image
+	build)
+		docker rm ac_deploy
+		docker rmi ac_deploy
+		docker build -t ac_deploy .
+		;;
+	
+	# bash runs an interactive container with a bash shell
+	bash)
+		container_cmd /bin/bash
+		;;
+	*)
+		echo >&2 'error: unknown command:' "$cmd"
+		usage >&2
+		exit 1
+		;;
+esac

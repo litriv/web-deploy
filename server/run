@@ -1,0 +1,158 @@
+#!/bin/bash
+
+set -e
+
+usage() {
+	base="$(basename "$0")"
+	cat <<EOUSAGE
+
+usage: $base command [args]
+
+Available Commands:
+
+  $base deploy app env [version]
+	- builds the web app image, pushes it to DockerHub and deploys the app using the AWS EB CLI
+	- ommitting version deploys the latest in git repo
+  $base sqlscript app env script
+	- runs SQL script for app and env
+  $base drop-tables app env
+	- drops tables for app and env
+  $base fixtures app env
+	- uploads fixtures for app and env
+
+EOUSAGE
+}
+
+sqlscript () {
+	psql --host="$1" --dbname=ebdb --username=ac -f "$2"
+}
+
+drop_tables () {
+	sqlscript "$1" web/scripts/db/down.sql
+}
+
+db_host() {
+	APP="$1"
+	ENV="$2"
+	DB_HOST_LINE=$(grep AC_DB_HOST "$APP"/.elasticbeanstalk/saved_configs/ac-"$APP"-"$ENV"-sc.cfg.yml)
+	DB_HOST=${DB_HOST_LINE:16}
+	echo $DB_HOST
+}
+
+# "shift" so that "$@" becomes the remaining arguments and can be passed along to other "go" subcommands easily
+cmd="$1"
+APP="$2"
+ENV="$3"
+if ! shift 3; then
+	usage >&2
+	exit 1
+fi
+
+case "$cmd" in
+	# deploy builds the web app image, pushes it to DockerHub and deploys the app using the AWS EB CLI
+	deploy)
+		NAME=web"
+		VERSION="$1"
+
+		TARGET=${NAME}
+
+		if [ "$VERSION" ]
+		then
+			TARGET=${TARGET}:${VERSION}
+		fi
+
+		echo "Target: "${TARGET}
+
+		if [ "$VERSION" ] && docker pull ${TARGET};
+		then
+			echo "$TARGET found on DockerHub."
+			echo "Checking out version $VERSION of code..."
+			(
+				cd build/web
+				git checkout tags/"$VERSION"
+			)
+			(
+				cd "$1"
+				eb use "$2"
+				eb deploy --version ${VERSION}
+			)
+		else
+			echo "Checking out latest code..."
+			(
+				cd build/web
+				git pull
+			)
+			echo "Building image for $TARGET..."
+			(
+				cd build
+				docker build -t ${TARGET} .
+			)
+			echo "Pushing image for $TARGET..."
+			docker push ${TARGET}
+			(
+				cd "$APP"
+				eb use "$ENV"
+				echo "Preparing Dockerrun.aws.json..."
+				SED_BUCKET="s/{{BUCKET}}/"$(cat bucket)/g
+				SED_TARGET="s/{{TARGET}}/"$(echo ${TARGET} | sed -e 's/\//\\\//g')/g
+				sed "$SED_BUCKET;$SED_TARGET" ../Dockerrun.aws.json > Dockerrun.aws.json
+				echo "Deploying Dockerrun.aws.json:"
+				cat Dockerrun.aws.json
+				if [ "$VERSION" ];
+                                then
+                                        eb deploy --label ${VERSION}
+                                else
+					# If we don't stage something new, eb will deploy HEAD version instead of new one
+					echo 1 >> v
+					git add v
+                                        eb deploy --staged
+                                fi
+			)
+		fi
+
+		echo "Applying db migrations..."
+		(
+			cd "$APP"
+			./migrate goto $(cat ../build/web/db_version)
+		)
+
+		echo "Done."
+		;;
+
+	# sqlscript runs script at $1
+	sqlscript)
+		sqlscript "$APP" $"ENV" $1
+		;;
+
+	# drop-tables drops tables
+	drop-tables)
+		drop_tables $"APP" $"ENV"
+		;;
+
+	# fixtures uploads fixtures
+	fixtures)
+		echo host $(db_host $APP $ENV)
+		AC_ENV=staging \
+		AC_DB_HOST=$(db_host "$APP" "$ENV") \
+		AC_DB_PASSWORD= \
+		AC_DB_SSL_MODE=require \
+		AC_DB_NAME=ebdb \
+		AC_DB_USER=  \
+		go run $(pwd)/build/web/fixtures/fixtures.go
+		;;
+
+	migrate)
+		USER
+		HOST=$(db_host "$APP" "$ENV") \
+		PW
+		DB=ebdb
+		SSL_MODE=require
+		migrate -url postgres://"$USER":"$PW"@"$HOST"/"$DB"?sslmode="$SSL_MODE" -path build/web/migrations "$@"
+		;;
+
+	*)
+		echo >&2 'error: unknown command:' "$cmd"
+		usage >&2
+		exit 1
+		;;
+esac

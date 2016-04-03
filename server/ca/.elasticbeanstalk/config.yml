@@ -1,0 +1,14 @@
+branch-defaults:
+  ca:
+    environment: ac-ca-qa
+  default:
+    environment: ac-ca-qa
+  master:
+    environment: ac-ca-qa
+global:
+  application_name: ac-ca
+  default_ec2_keyname: aws-eb
+  default_platform: 64bit Amazon Linux 2015.03 v1.4.3 running Docker 1.6.2
+  default_region: us-east-1
+  profile: ca
+  sc: git

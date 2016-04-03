@@ -1,0 +1,14 @@
+branch-defaults:
+  master:
+    environment: nz-qa
+  nz:
+    environment: nz-qa
+  default:
+    environment: nz-qa
+global:
+  application_name: nz
+  default_ec2_keyname: aws-eb
+  default_platform: 64bit Amazon Linux 2015.03 v1.4.3 running Docker 1.6.2
+  default_region: ap-southeast-2
+  profile: nz
+  sc: git
